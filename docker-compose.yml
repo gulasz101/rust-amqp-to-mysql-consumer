@@ -1,5 +1,8 @@
 version: "3.2"
 
+volumes:
+  data_mysql:
+
 services:
   rabbitmq:
     image: rabbitmq:3.7-management-alpine
@@ -10,3 +13,18 @@ services:
     environment:
       - RABBITMQ_DEFAULT_USER
       - RABBITMQ_DEFAULT_PASS
+  mysql:
+    image: mariadb
+    restart: always
+    ports:
+      - "3306:3306"
+    volumes:
+      - data_mysql:/var/lib/mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD
+      - MYSQL_DATABASE
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 8080:8080
