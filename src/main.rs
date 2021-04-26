@@ -7,6 +7,9 @@ use log::info;
 use lapin::{options::*, types::FieldTable, Connection, ConnectionProperties, Consumer};
 
 use futures_lite::stream::StreamExt;
+use mysql::Pool;
+use mysql::prelude::Queryable;
+use mysql::params;
 
 fn main() {
     // load .env if exists
@@ -21,19 +24,32 @@ fn main() {
     // "fake" queue name
     let queue_name_for_consuming = String::from("example_queue");
 
-    let addr = env::var("AMQP_ADDR")
+    let amqp_conn_url = env::var("AMQP_ADDR")
         .unwrap_or_else(
             |_| "amqp://127.0.0.1:5672/%2f".into()
         );
 
+    let mysql_conn_url = env::var("MYSQL_CONNECTION_URL")
+        .expect("MYSQL_CONNECTION_URL env missing !!");
+    let pool = Pool::new(mysql_conn_url).unwrap();
+    let mut mysql_conn = pool.get_conn().unwrap();
+
     // lock main thread with closure
     async_global_executor::block_on(async {
         // do some connecting to queue
-        let consumer = connect_to_queue(&addr, &queue_name_for_consuming).await;
+        let consumer = connect_to_queue(&amqp_conn_url, &queue_name_for_consuming).await;
 
         // loop for receiving messages, process them by closure.
         consume(consumer, |possible_json| {
-            println!("{}", possible_json)
+            // println!("{}", possible_json)
+            mysql_conn.exec_drop({r"
+                insert into messages(body)
+                value (:body)
+                "},
+                params! {
+                    "body" => possible_json
+                }
+            ).unwrap();
         }).await;
     });
 }
@@ -80,9 +96,9 @@ async fn connect_to_queue(addr: &String, queue_name_for_consuming: &String) -> C
     _consumer
 }
 
-async fn consume<F>(mut consumer: Consumer, handle_json_string: F)
+async fn consume<F>(mut consumer: Consumer, mut handle_json_string: F)
     where
-        F: Fn(String)
+        F: FnMut(String)
 {
     while let Ok(delivery) = consumer
         .next()
